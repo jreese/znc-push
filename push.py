@@ -25,6 +25,14 @@ try:
 except ImportError:
     requests = None
 
+Email_Available = True
+try:
+        from email.mime.text import MIMEText
+        from smtplib import SMTP_SSL
+        from smtplib import SMTP
+except ImportError:
+        Email_Available = False
+
 APP_NAME = 'ZNC Push'
 VERSION = 'v2.0.0-rc'
 USER_AGENT = '{0}/{1}'.format(APP_NAME, VERSION)
@@ -563,13 +571,9 @@ class PushConditions(object):
         return value != 'yes' or self.module.GetNetwork().IsIRCAway()
 
     def client_count_less_than(self):
-        # todo: fix GetClients() returning a SwigPyObject that we can't use
-        return True
-
         value = C.get('client_count_less_than')
         network = self.module.GetNetwork()
         clients = network.GetClients()
-
         return value == 0 or len(clients) < value
 
     def idle(self):
@@ -1216,6 +1220,44 @@ class Email(PushService):
     }
 
     def send(self, context):
+        if Email_Available:
+            secret = C.get('secret')
+            target = C.get('target')
+            msgText = C.get_expanded('message_content')
+            msgTitle = C.get_expanded('message_title')
+
+            partsProtocol = secret.split('://')
+            if partsProtocol[0] == 'smtps':
+                port = 465
+                protocol = SMTP_SSL
+            else:
+                port = 25
+                protocol = SMTP
+
+            seperatorAccount = partsProtocol[1].find(':')
+            user = partsProtocol[1][:seperatorAccount]
+
+            partsPassword = partsProtocol[1][seperatorAccount+1:].split('@')
+            password = partsPassword[0]
+
+            partsServer = partsPassword[1].split(':')
+            server = partsServer[0]
+            if len(partsServer) > 1:
+                port = partsServer[1]
+            server += ':' + port
+
+            msg = MIMEText(msgText, 'plain')
+            msg['Subject'] = msgTitle
+            msg['From']   = user
+
+            conn = protocol(server)
+            conn.set_debuglevel(False)
+            conn.login(user, password)
+            try:
+                conn.sendmail(user, [target], msg.as_string())
+            finally:
+                conn.close()
+
         return None
 
 
